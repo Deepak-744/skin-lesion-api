@@ -3,15 +3,15 @@ Inference Engine for ConvNeXt-Tiny Skin Lesion Classification.
 Coordinates preprocessing, model forward pass, score calculation, and Grad-CAM generation.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any
 from PIL import Image
 import torch
 import numpy as np
 
 from .model_loader import get_model
 from .preprocessing import preprocess_image
-from .class_info import CLASS_DETAILS, IDX_TO_CLASS, CLASS_TO_IDX, MEDICAL_DISCLAIMER, MODEL_EVALUATION_METRICS
-from .gradcam import ConvNeXtGradCAM, overlay_gradcam, image_to_base64
+from .class_info import CLASS_DETAILS, IDX_TO_CLASS, MEDICAL_DISCLAIMER, MODEL_EVALUATION_METRICS
+from .gradcam import generate_heatmap, overlay_gradcam, image_to_base64
 
 
 def run_inference(pil_img: Image.Image, generate_cam: bool = True) -> Dict[str, Any]:
@@ -32,7 +32,8 @@ def run_inference(pil_img: Image.Image, generate_cam: bool = True) -> Dict[str, 
     
     # Forward pass
     with torch.no_grad():
-        logits = model(input_tensor)
+        features = model.features(input_tensor)
+        logits = model.classifier(model.avgpool(features))
         probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
         
     top_idx = int(np.argmax(probabilities))
@@ -68,9 +69,7 @@ def run_inference(pil_img: Image.Image, generate_cam: bool = True) -> Dict[str, 
     
     if generate_cam:
         try:
-            cam_generator = ConvNeXtGradCAM(model)
-            heatmap = cam_generator.generate_heatmap(input_tensor, class_idx=top_idx)
-            cam_generator.remove_hooks()
+            heatmap = generate_heatmap(model, features, top_idx)
             
             blended_img = overlay_gradcam(pil_img, heatmap, alpha=0.55)
             gradcam_base64 = image_to_base64(blended_img, format="JPEG")
